@@ -1,11 +1,13 @@
-
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
+
 """
 Python wrapper for the Criteo API
 
 
 """
 from suds.client import Client as soapclient
+from util import CurrencyConverter
 import xml.etree.ElementTree as etree
 
 import time
@@ -219,12 +221,16 @@ class Client(object):
             _assign(reportJob, report)
         )
 
-    def downloadReport(self, jobID, path):
+    def downloadReport(self, jobID, path, convert_currencies_to=False):
         """
         Utility method for downloading a report in csv format.
         Args:
             jobID: jobID
             path: path to destination csv file
+
+        KwArgs:
+            convert_currencies_to: convert costs and amounts to currency
+                                   (ISO 4217 format)
         """
         while True:
             if not self.CLIENT.service.getJobStatus(jobID) == 'Pending':
@@ -236,6 +242,9 @@ class Client(object):
 
         rows = [i for i in table if i.tag == 'rows'][0]
 
+        if convert_currencies_to:
+            rows = self._convert_currencies(rows, convert_currencies_to)
+
         with open(path, 'w') as rep:
             wr = csv.DictWriter(
                 rep,
@@ -245,6 +254,25 @@ class Client(object):
 
             for row in rows:
                 wr.writerow(row.attrib)
+
+    def _convert_currencies(self, rows, to_currency):
+        from_currency = self.getAccount()['currency']
+        convert = CurrencyConverter(from_currency, to_currency).convert
+        currency_fields = ['cost',
+                           'costOfSale',
+                           'costPerOrder',
+                           'ecpm',
+                           'orderValue',
+                           'orderValuePostView',
+                           'revcpc']
+        for row in rows:
+            for field in currency_fields:
+                try:
+                    amount = row.attrib[field]
+                    row.attrib[field] = convert(amount)
+                except KeyError:
+                    pass
+        return rows
 
     def _make_type(self, object_name):
         return self.CLIENT.factory.create(object_name)
